@@ -59,7 +59,7 @@ def get_contrasting_colors(image, num_colors=5):
             best_contrast_pair = (color, color2)
             maxcontrast = contrast
             break
-    return(rgb_to_hex(best_contrast_pair[0],best_contrast_pair[1]))
+    return(rgb_to_hex(best_contrast_pair[0]),rgb_to_hex(best_contrast_pair[1]))
 
     # Convert colors to hex strings
     most_saturated_color_hex = rgb_to_hex(most_saturated_color)

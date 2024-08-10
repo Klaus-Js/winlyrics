@@ -1,4 +1,5 @@
 import asyncio
+import os
 from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as MediaManager, GlobalSystemMediaTransportControlsSessionPlaybackStatus as SessionPlaybackStatus
 import winrt.windows.storage.streams as wss
 from lrclib import LrcLibAPI
@@ -180,7 +181,7 @@ async def display_lyrics(lyrics, lyric_display, startinfo):
     current_session = sessions.get_current_session()
     await current_session.try_pause_async()
     await asyncio.sleep(0.5)
-    initial_position = current_media_info['position_seconds'].total_seconds() - 0.5
+    initial_position = current_media_info['position_seconds'].total_seconds() #- 0.5
     await current_session.try_play_async()
     start_time = time.monotonic()
     while True:
@@ -209,7 +210,7 @@ async def display_lyrics(lyrics, lyric_display, startinfo):
                     last_displayed_index = new_displayed_index
 
         elif playback_status == SessionPlaybackStatus.PAUSED:
-            initial_position = current_media_info['position_seconds'].total_seconds() - 0.5
+            initial_position = current_media_info['position_seconds'].total_seconds() #- 0.5
             start_time = time.monotonic()
 
         await asyncio.sleep(0.1)  # Increase the interval to reduce lag
@@ -317,6 +318,12 @@ async def get_lyrics_from_api(media_info):
     # Get the lyrics using the closest match
     lyrics = (api.get_lyrics_by_id(lrclib_id=results[closest_index].id)).synced_lyrics
     return lyrics
+def save_lyrics_to_file(lyrics, file_path):
+    try:
+        with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(lyrics)
+    except Exception as e:
+        print(f"Error saving lyrics to file: {e}")
 
 async def main_loop():
     while True:
@@ -326,24 +333,32 @@ async def main_loop():
             print(current_media_info)
             cv2_image = pil_to_cv2(current_media_info['thumbnail'])
             cv2.imshow('cover',cv2_image)
-
+            file_path = os.path.join("saved/", f"{current_media_info['title']}-{current_media_info['artist']}.lrc")
             
             startmediainfo = current_media_info
-            try:
-                lyrics = await get_lyrics_from_api(current_media_info)
-            except Exception as e:
-                print(e)
-                nolyric=True
-                nolyrictrack = current_media_info['title']
-                while nolyric:
-                    current_media_info = await get_media_info()
-                    nolyric = nolyrictrack == current_media_info['title']
-                    await asyncio.sleep(2)
-                raise Exception('Music with no lyrics ended')
+            if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as file:
+                        file_content = file.read()
+                        parsed_lyrics = parse_lyric_file(file_content)
+                        filename = file.name
 
-                    
-            parsed_lyrics = parse_lyric_file(lyrics)
+                    print("loaded lyric file:", filename)
+            else:        
+                try:
+                    lyrics = await get_lyrics_from_api(current_media_info)
+                except Exception as e:
+                    print(e)
+                    nolyric=True
+                    nolyrictrack = current_media_info['title']
+                    while nolyric:
+                        current_media_info = await get_media_info()
+                        nolyric = nolyrictrack == current_media_info['title']
+                        await asyncio.sleep(2)
+                    raise Exception('Music with no lyrics ended')
 
+                save_lyrics_to_file(lyrics, file_path)    
+                parsed_lyrics = parse_lyric_file(lyrics)
+                
             await display_lyrics(parsed_lyrics, lyric_display, startmediainfo)
         except Exception as e:
             print('Error:', e)

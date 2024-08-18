@@ -14,6 +14,7 @@ import pyglet
 import async_tkinter_loop
 import numpy as np
 import colors
+import syncedlyrics
 def convert_to_timedelta(time_string):
     clean_time_string = time_string.strip("[]")
     time_obj = datetime.strptime(clean_time_string, "%M:%S.%f")
@@ -216,107 +217,118 @@ async def display_lyrics(lyrics, lyric_display, startinfo):
         await asyncio.sleep(0.1)  # Increase the interval to reduce lag
 async def get_lyrics_from_api(media_info):
     # Initial search
-    results = api.search_lyrics(
-        track_name=media_info['title'],
-        artist_name=media_info['artist'],
-        album_name=media_info['album_title'],
-    )
-    print("All search results:")
-    for result in results:
-        print(f"api result {result.track_name} - {result.artist_name} ({result.album_name})")
-
-    if len(results) < 1:
+    try:
         results = api.search_lyrics(
             track_name=media_info['title'],
-            artist_name=media_info['artist']
+            artist_name=media_info['artist'],
+            album_name=media_info['album_title'],
         )
-        print("All search results after fallback 1:")
+        print("All search results:")
         for result in results:
             print(f"api result {result.track_name} - {result.artist_name} ({result.album_name})")
 
-    if len(results) < 1:
-        results = api.search_lyrics(
-            track_name=media_info['title'],
-            artist_name=media_info['artist'].replace(" e ", " ")
-        )+api.search_lyrics(
-            track_name=media_info['title'],
-            artist_name=media_info['artist'].split(",")[0]
-        )
-        print("All search results after fallback 2:")
-        for result in results:
-            print(f"api result {result.track_name} - {result.artist_name} ({result.album_name})")
+        if len(results) < 1:
+            results = api.search_lyrics(
+                track_name=media_info['title'],
+                artist_name=media_info['artist']
+            )
+            print("All search results after fallback 1:")
+            for result in results:
+                print(f"api result {result.track_name} - {result.artist_name} ({result.album_name})")
 
-    if len(results) < 1:
-        results = api.search_lyrics(
-            track_name=media_info['title']
-        )
-        print("All search results after fallback 3:")
-        for result in results:
-            print(f"api result {result.track_name} - {result.artist_name} ({result.album_name})")
+        if len(results) < 1:
+            results = api.search_lyrics(
+                track_name=media_info['title'],
+                artist_name=media_info['artist'].replace(" e ", " ")
+            )+api.search_lyrics(
+                track_name=media_info['title'],
+                artist_name=media_info['artist'].split(",")[0]
+            )+api.search_lyrics(
+                track_name=media_info['title'].split("(")[0],
+                artist_name=media_info['artist'].split(",")[0]
+            )
+            print("All search results after fallback 2:")
+            for result in results:
+                print(f"api result {result.track_name} - {result.artist_name} ({result.album_name})")
 
-    if len(results) < 1:
-        raise Exception('Lyrics not found in API')
+        if len(results) < 1:
+            results = api.search_lyrics(
+                track_name=media_info['title']
+            )
+            print("All search results after fallback 3:")
+            for result in results:
+                print(f"api result {result.track_name} - {result.artist_name} ({result.album_name})")
 
-    # Extract durations and other relevant info
-    durations = np.array([result.duration for result in results])
-    instrumentals = np.array([result.instrumental for result in results])
-    synced_lyrics_available = np.array([
-        result.synced_lyrics is not None
-        for result in results
-    ])
+        if len(results) < 1:
+            raise Exception('Lyrics not found in API')
 
-    # Calculate differences from the target duration
-    differences = np.abs(durations - media_info['end_time_seconds'].total_seconds())
+        # Extract durations and other relevant info
+        durations = np.array([result.duration for result in results])
+        instrumentals = np.array([result.instrumental for result in results])
+        synced_lyrics_available = np.array([
+            result.synced_lyrics is not None
+            for result in results
+        ])
 
-    # Apply threshold to filter results
-    valid_indices = np.where(differences < 10)[0]
+        # Calculate differences from the target duration
+        differences = np.abs(durations - media_info['end_time_seconds'].total_seconds())
 
-    print(f"Valid results within threshold:")
-    for i in valid_indices:
-        print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
+        # Apply threshold to filter results
+        valid_indices = np.where(differences < 10)[0]
 
-    if len(valid_indices) == 0:
-        raise Exception('No results within the threshold')
+        print(f"Valid results within threshold:")
+        for i in valid_indices:
+            print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
 
-    # Find indices of all minimum differences within the threshold
-    min_difference = np.min(differences[valid_indices])
-    closest_indices = valid_indices[differences[valid_indices] == min_difference]
+        if len(valid_indices) == 0:
+            raise Exception("No lyrics within treshold")
+        # Find indices of all minimum differences within the threshold
+        min_difference = np.min(differences[valid_indices])
+        closest_indices = valid_indices[differences[valid_indices] == min_difference]
 
-    print(f"Closest results:")
-    for i in closest_indices:
-        print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
+        print(f"Closest results:")
+        for i in closest_indices:
+            print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
 
-    # Filter out results where instrumental is True
-    filtered_indices = closest_indices[~instrumentals[closest_indices]]
+        # Filter out results where instrumental is True
+        filtered_indices = closest_indices[~instrumentals[closest_indices]]
 
-    print(f"Filtered results (not instrumental):")
-    for i in filtered_indices:
-        print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
+        print(f"Filtered results (not instrumental):")
+        for i in filtered_indices:
+            print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
 
-    # From remaining results, prefer those with synced_lyrics not None
-    final_indices = filtered_indices[synced_lyrics_available[filtered_indices]]
+        # From remaining results, prefer those with synced_lyrics not None
+        final_indices = filtered_indices[synced_lyrics_available[filtered_indices]]
 
-    print(f"Final results (with synced lyrics):")
-    for i in final_indices:
-        print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
+        print(f"Final results (with synced lyrics):")
+        for i in final_indices:
+            print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
 
-    # If no results are left after filtering, revert to all closest indices
-    if len(final_indices) == 0:
-        final_indices = filtered_indices
+        # If no results are left after filtering, revert to all closest indices
+        if len(final_indices) == 0:
+            final_indices = filtered_indices
 
-    # If still no results, fall back to all closest indices (including instrumentals if necessary)
-    if len(final_indices) == 0:
-        final_indices = closest_indices
+        # If still no results, fall back to all closest indices (including instrumentals if necessary)
+        if len(final_indices) == 0:
+            final_indices = closest_indices
 
-    print(f"Final results (after fallback):")
-    for i in final_indices:
-        print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
+        print(f"Final results (after fallback):")
+        for i in final_indices:
+            print(f"api result {results[i].track_name} - {results[i].artist_name} ({results[i].album_name})")
 
-    # Choose the first index from the final list
-    closest_index = final_indices[0]
+        # Choose the first index from the final list
+        closest_index = final_indices[0]
 
-    # Get the lyrics using the closest match
-    lyrics = (api.get_lyrics_by_id(lrclib_id=results[closest_index].id)).synced_lyrics
+        # Get the lyrics using the closest match
+        lyrics = (api.get_lyrics_by_id(lrclib_id=results[closest_index].id)).synced_lyrics
+        
+    except Exception as e:
+        print("No lyrics found with old method: ", e)
+        TRACK_NAME = media_info['title']
+        ARTIST_NAME = media_info['artist']
+        lyrics = syncedlyrics.search(f"{TRACK_NAME} {ARTIST_NAME}", synced_only=True)
+    if lyrics ==None:
+        raise Exception("No lyrics found in both methods")
     return lyrics
 def save_lyrics_to_file(lyrics, file_path):
     try:
